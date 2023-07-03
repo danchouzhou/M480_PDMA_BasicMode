@@ -94,6 +94,7 @@ void SYS_Init(void)
     /* Enable PDMA clock source */
     CLK_EnableModuleClock(PDMA_MODULE);
     CLK_EnableModuleClock(TMR0_MODULE);
+    CLK_EnableModuleClock(EBI_MODULE);
 
     CLK_SetModuleClock(TMR0_MODULE, CLK_CLKSEL1_TMR0SEL_PCLK0, 0);
 
@@ -107,6 +108,50 @@ void UART0_Init()
 
     /* Configure UART0 and set UART0 baud rate */
     UART_Open(UART0, 115200);
+}
+
+void Configure_EBI_16BIT_Pins(void)
+{
+    /* EBI AD0~5 pins on PC.0~5 */
+    SYS->GPC_MFPL |= SYS_GPC_MFPL_PC0MFP_EBI_AD0 | SYS_GPC_MFPL_PC1MFP_EBI_AD1 |
+                     SYS_GPC_MFPL_PC2MFP_EBI_AD2 | SYS_GPC_MFPL_PC3MFP_EBI_AD3 |
+                     SYS_GPC_MFPL_PC4MFP_EBI_AD4 | SYS_GPC_MFPL_PC5MFP_EBI_AD5;
+
+    /* EBI AD6, AD7 pins on PD.8, PD.9 */
+    SYS->GPD_MFPH |= SYS_GPD_MFPH_PD8MFP_EBI_AD6 | SYS_GPD_MFPH_PD9MFP_EBI_AD7;
+
+    /* EBI AD8, AD9 pins on PE.14, PE.15 */
+    SYS->GPE_MFPH |= SYS_GPE_MFPH_PE14MFP_EBI_AD8 | SYS_GPE_MFPH_PE15MFP_EBI_AD9;
+
+    /* EBI AD10, AD11 pins on PE.1, PE.0 */
+    SYS->GPE_MFPL |= SYS_GPE_MFPL_PE1MFP_EBI_AD10 | SYS_GPE_MFPL_PE0MFP_EBI_AD11;
+
+    /* EBI AD12~15 pins on PH.8~11 */
+    SYS->GPH_MFPH |= SYS_GPH_MFPH_PH8MFP_EBI_AD12 | SYS_GPH_MFPH_PH9MFP_EBI_AD13 |
+                     SYS_GPH_MFPH_PH10MFP_EBI_AD14 | SYS_GPH_MFPH_PH11MFP_EBI_AD15;
+
+    /* EBI ADR16, ADR17 pins on PF.9, PF.8 */
+    SYS->GPF_MFPH |= SYS_GPF_MFPH_PF9MFP_EBI_ADR16 | SYS_GPF_MFPH_PF8MFP_EBI_ADR17;
+
+    /* EBI ADR18, ADR19 pins on PF.7, PF.6 */
+    SYS->GPF_MFPL |= SYS_GPF_MFPL_PF7MFP_EBI_ADR18 | SYS_GPF_MFPL_PF6MFP_EBI_ADR19;
+
+
+    /* EBI RD and WR pins on PE.4 and PE.5 */
+    SYS->GPE_MFPL |= SYS_GPE_MFPL_PE4MFP_EBI_nWR | SYS_GPE_MFPL_PE5MFP_EBI_nRD;
+
+    /* EBI WRL and WRH pins on PG.7 and PG.8 */
+    SYS->GPG_MFPL |= SYS_GPG_MFPL_PG7MFP_EBI_nWRL;
+    SYS->GPG_MFPH |= SYS_GPG_MFPH_PG8MFP_EBI_nWRH;
+
+    /* EBI CS0 pin on PD.12 */
+    SYS->GPD_MFPH |= SYS_GPD_MFPH_PD12MFP_EBI_nCS0;
+
+    /* EBI ALE pin on PE.2 */
+    SYS->GPE_MFPL |= SYS_GPE_MFPL_PE2MFP_EBI_ALE;
+
+    /* EBI MCLK pin on PE.3 */
+    SYS->GPE_MFPL |= SYS_GPE_MFPL_PE3MFP_EBI_MCLK;
 }
 
 
@@ -126,6 +171,12 @@ int main(void)
     /* Init UART for printf */
     UART0_Init();
 
+    /* Configure multi-function pins for EBI 16-bit application */
+    Configure_EBI_16BIT_Pins();
+
+    /* Initialize EBI bank0 to access external SRAM */
+    EBI_Open(EBI_BANK0, EBI_BUSWIDTH_16BIT, EBI_TIMING_FAST, 0, EBI_CS_ACTIVE_LOW);
+
     printf("\n\nCPU @ %dHz\n", SystemCoreClock);
     printf("+------------------------------------------------------+ \n");
     printf("|    PDMA Memory to Memory Driver Sample Code          | \n");
@@ -140,7 +191,7 @@ int main(void)
     /* Transfer count is PDMA_TEST_LENGTH, transfer width is 16-bit */
     PDMA_SetTransferCnt(PDMA,2, PDMA_WIDTH_16, PDMA_TEST_LENGTH);
     /* Set source address is au8SrcArray, destination address is au8DestArray, Source/Destination increment size is 32 bits(one word) */
-    PDMA_SetTransferAddr(PDMA,2, (uint32_t)au8SrcArray, PDMA_SAR_INC, (uint32_t)au8DestArray, PDMA_DAR_INC);
+    PDMA_SetTransferAddr(PDMA,2, (uint32_t)au8SrcArray, PDMA_SAR_INC, (uint32_t)EBI_BANK0_BASE_ADDR, PDMA_DAR_FIX);
     /* Request source is memory to memory */
     //PDMA_SetTransferMode(PDMA,2, PDMA_MEM, FALSE, 0);
     PDMA_SetTransferMode(PDMA,2, PDMA_TMR0, FALSE, 0);
@@ -178,6 +229,9 @@ int main(void)
 
     /* Close channel 2 */
     PDMA_Close(PDMA);
+
+    /* Disable EBI function */
+    EBI_Close(EBI_BANK0);
 
     /* Print the transfer result */
     for(int i=0; i<256; i++)
