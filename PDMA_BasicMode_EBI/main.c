@@ -230,16 +230,17 @@ int main(void)
     /* Close channel 2 */
     PDMA_Close(PDMA);
 
-    /* Disable EBI function */
-    EBI_Close(EBI_BANK0);
-
     /* Print the transfer result */
     for(int i=0; i<256; i++)
     {
         if(i%8 == 0)
             printf("\r\n");
-        printf("%d ", au8DestArray[i]);
+        printf("%d ", EBI0_READ_DATA8(i));
     }
+
+    /* Disable EBI function */
+    EBI_Close(EBI_BANK0);
+
     printf("\r\n");
     printf("Execute clock cycle: %d\r\n", (g_u32SysTick_last - g_u32SysTick_current));
     //printf("%d\r\n", g_u32SysTick_last);
