@@ -18,17 +18,20 @@
 /*---------------------------------------------------------------------------------------------------------*/
 /* Global variables                                                                                        */
 /*---------------------------------------------------------------------------------------------------------*/
-uint32_t PDMA_TEST_LENGTH = 64;
+uint32_t PDMA_TEST_LENGTH = 128;
 #ifdef __ICCARM__
 #pragma data_alignment=4
 uint8_t au8SrcArray[256];
 uint8_t au8DestArray[256];
 #else
-__attribute__((aligned(4))) uint8_t au8SrcArray[256];
-__attribute__((aligned(4))) uint8_t au8DestArray[256];
+__attribute__((aligned(4))) uint8_t au8SrcArray[256]= {0};
+__attribute__((aligned(4))) uint8_t au8DestArray[256] = {0};
 #endif
 
 uint32_t volatile g_u32IsTestOver = 0;
+
+uint32_t volatile g_u32SysTick_last = 0;
+uint32_t volatile g_u32SysTick_current = 0;
 
 /**
  * @brief       DMA IRQ
@@ -53,6 +56,8 @@ void PDMA_IRQHandler(void)
     }
     else if(status & PDMA_INTSTS_TDIF_Msk)      /* done */
     {
+        g_u32SysTick_current = SysTick->VAL;
+        SysTick->CTRL = 0;
         /* Check transmission of channel 2 has been transfer done */
         if(PDMA_GET_TD_STS(PDMA) & PDMA_TDSTS_TDIF2_Msk)
             g_u32IsTestOver = 1;
@@ -88,6 +93,9 @@ void SYS_Init(void)
 
     /* Enable PDMA clock source */
     CLK_EnableModuleClock(PDMA_MODULE);
+    CLK_EnableModuleClock(TMR0_MODULE);
+
+    CLK_SetModuleClock(TMR0_MODULE, CLK_CLKSEL1_TMR0SEL_PCLK0, 0);
 
     /* Set GPB multi-function pins for UART0 RXD and TXD */
     SYS->GPB_MFPH &= ~(SYS_GPB_MFPH_PB12MFP_Msk | SYS_GPB_MFPH_PB13MFP_Msk);
@@ -123,48 +131,22 @@ int main(void)
     printf("|    PDMA Memory to Memory Driver Sample Code          | \n");
     printf("+------------------------------------------------------+ \n");
 
-
-    /*------------------------------------------------------------------------------------------------------
-
-                         au8SrcArray                         au8DestArray
-                         ---------------------------   -->   ---------------------------
-                       /| [0]  | [1]  |  [2] |  [3] |       | [0]  | [1]  |  [2] |  [3] |\
-                        |      |      |      |      |       |      |      |      |      |
-       PDMA_TEST_LENGTH |            ...            |       |            ...            | PDMA_TEST_LENGTH
-                        |      |      |      |      |       |      |      |      |      |
-                       \| [60] | [61] | [62] | [63] |       | [60] | [61] | [62] | [63] |/
-                         ---------------------------         ---------------------------
-                         \                         /         \                         /
-                               32bits(one word)                     32bits(one word)
-
-      PDMA transfer configuration:
-
-        Channel = 2
-        Operation mode = basic mode
-        Request source = PDMA_MEM(memory to memory)
-        transfer done and table empty interrupt = enable
-
-        Transfer count = PDMA_TEST_LENGTH
-        Transfer width = 32 bits(one word)
-        Source address = au8SrcArray
-        Source address increment size = 32 bits(one word)
-        Destination address = au8DestArray
-        Destination address increment size = 32 bits(one word)
-        Transfer type = burst transfer
-
-        Total transfer length = PDMA_TEST_LENGTH * 32 bits
-    ------------------------------------------------------------------------------------------------------*/
+    /* Prepare trasfer data */
+    for (int i=0; i<256; i++)
+        au8SrcArray[i] = i;
 
     /* Open Channel 2 */
     PDMA_Open(PDMA,1 << 2);
-    /* Transfer count is PDMA_TEST_LENGTH, transfer width is 32 bits(one word) */
-    PDMA_SetTransferCnt(PDMA,2, PDMA_WIDTH_32, PDMA_TEST_LENGTH);
+    /* Transfer count is PDMA_TEST_LENGTH, transfer width is 16-bit */
+    PDMA_SetTransferCnt(PDMA,2, PDMA_WIDTH_16, PDMA_TEST_LENGTH);
     /* Set source address is au8SrcArray, destination address is au8DestArray, Source/Destination increment size is 32 bits(one word) */
     PDMA_SetTransferAddr(PDMA,2, (uint32_t)au8SrcArray, PDMA_SAR_INC, (uint32_t)au8DestArray, PDMA_DAR_INC);
     /* Request source is memory to memory */
-    PDMA_SetTransferMode(PDMA,2, PDMA_MEM, FALSE, 0);
+    //PDMA_SetTransferMode(PDMA,2, PDMA_MEM, FALSE, 0);
+    PDMA_SetTransferMode(PDMA,2, PDMA_TMR0, FALSE, 0);
     /* Transfer type is burst transfer and burst size is 4 */
-    PDMA_SetBurstType(PDMA,2, PDMA_REQ_BURST, PDMA_BURST_4);
+    //PDMA_SetBurstType(PDMA,2, PDMA_REQ_BURST, PDMA_BURST_4);
+    PDMA_SetBurstType(PDMA,2, PDMA_REQ_SINGLE, 0);
 
     /* Enable interrupt */
     PDMA_EnableInt(PDMA,2, PDMA_INT_TRANS_DONE);
@@ -173,8 +155,17 @@ int main(void)
     NVIC_EnableIRQ(PDMA_IRQn);
     g_u32IsTestOver = 0;
 
-    /* Generate a software request to trigger transfer with PDMA channel 2  */
-    PDMA_Trigger(PDMA,2);
+    SysTick->LOAD = 16777216 - 1;
+    SysTick->VAL  = (0x00);
+    SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_ENABLE_Msk;
+    asm("nop");
+    g_u32SysTick_last = SysTick->VAL;
+
+    /* Generate request to trigger transfer with PDMA channel 2  */
+    //PDMA_Trigger(PDMA,2);
+    TIMER_Open(TIMER0, TIMER_PERIODIC_MODE, 10000000);
+    TIMER_SetTriggerTarget(TIMER0, TIMER_TRG_TO_PDMA);
+    TIMER_Start(TIMER0);
 
     /* Waiting for transfer done */
     while(g_u32IsTestOver == 0);
@@ -187,6 +178,18 @@ int main(void)
 
     /* Close channel 2 */
     PDMA_Close(PDMA);
+
+    /* Print the transfer result */
+    for(int i=0; i<256; i++)
+    {
+        if(i%8 == 0)
+            printf("\r\n");
+        printf("%d ", au8DestArray[i]);
+    }
+    printf("\r\n");
+    printf("Execute clock cycle: %d\r\n", (g_u32SysTick_last - g_u32SysTick_current));
+    //printf("%d\r\n", g_u32SysTick_last);
+    //printf("%d\r\n", g_u32SysTick_current);
 
     while(1);
 }
