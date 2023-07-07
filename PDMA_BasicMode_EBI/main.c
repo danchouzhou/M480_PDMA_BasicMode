@@ -18,7 +18,7 @@
 /*---------------------------------------------------------------------------------------------------------*/
 /* Global variables                                                                                        */
 /*---------------------------------------------------------------------------------------------------------*/
-uint32_t PDMA_TEST_LENGTH = 128;
+uint32_t PDMA_TEST_LENGTH = 256;
 #ifdef __ICCARM__
 #pragma data_alignment=4
 uint8_t au8SrcArray[256];
@@ -45,6 +45,7 @@ uint32_t volatile g_u32SysTick_current = 0;
 void PDMA_IRQHandler(void)
 {
     uint32_t status = PDMA_GET_INT_STATUS(PDMA);
+    g_u32SysTick_current = SysTick->VAL;
 
     if(status & PDMA_INTSTS_ABTIF_Msk)    /* abort */
     {
@@ -56,7 +57,6 @@ void PDMA_IRQHandler(void)
     }
     else if(status & PDMA_INTSTS_TDIF_Msk)      /* done */
     {
-        g_u32SysTick_current = SysTick->VAL;
         SysTick->CTRL = 0;
         /* Check transmission of channel 2 has been transfer done */
         if(PDMA_GET_TD_STS(PDMA) & PDMA_TDSTS_TDIF2_Msk)
@@ -175,7 +175,7 @@ int main(void)
     Configure_EBI_16BIT_Pins();
 
     /* Initialize EBI bank0 to access external SRAM */
-    EBI_Open(EBI_BANK0, EBI_BUSWIDTH_16BIT, EBI_TIMING_FAST, 0, EBI_CS_ACTIVE_LOW);
+    EBI_Open(EBI_BANK0, EBI_BUSWIDTH_8BIT, EBI_TIMING_FAST, 0, EBI_CS_ACTIVE_LOW);
 
     printf("\n\nCPU @ %dHz\n", SystemCoreClock);
     printf("+------------------------------------------------------+ \n");
@@ -188,8 +188,8 @@ int main(void)
 
     /* Open Channel 2 */
     PDMA_Open(PDMA,1 << 2);
-    /* Transfer count is PDMA_TEST_LENGTH, transfer width is 16-bit */
-    PDMA_SetTransferCnt(PDMA,2, PDMA_WIDTH_16, PDMA_TEST_LENGTH);
+    /* Transfer count is PDMA_TEST_LENGTH, transfer width is 8-bit */
+    PDMA_SetTransferCnt(PDMA,2, PDMA_WIDTH_8, PDMA_TEST_LENGTH);
     /* Set source address is au8SrcArray, destination address is au8DestArray, Source/Destination increment size is 32 bits(one word) */
     PDMA_SetTransferAddr(PDMA,2, (uint32_t)au8SrcArray, PDMA_SAR_INC, (uint32_t)EBI_BANK0_BASE_ADDR, PDMA_DAR_FIX);
     /* Request source is memory to memory */
@@ -210,12 +210,13 @@ int main(void)
     SysTick->VAL  = (0x00);
     SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_ENABLE_Msk;
     asm("nop");
-    g_u32SysTick_last = SysTick->VAL;
 
     /* Generate request to trigger transfer with PDMA channel 2  */
     //PDMA_Trigger(PDMA,2);
     TIMER_Open(TIMER0, TIMER_PERIODIC_MODE, 10000000);
     TIMER_SetTriggerTarget(TIMER0, TIMER_TRG_TO_PDMA);
+    
+    g_u32SysTick_last = SysTick->VAL;
     TIMER_Start(TIMER0);
 
     /* Waiting for transfer done */
